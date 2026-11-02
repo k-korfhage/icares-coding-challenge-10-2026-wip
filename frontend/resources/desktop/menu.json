@@ -1,0 +1,7 @@
+{
+  "leaf": false,
+  "children": [
+    { "text": "Termine einsehen", "iconCls": "x-fa fa-calendar", "xtype": "appointmentlistview", "leaf": true },
+    { "text": "Termine buchen", "iconCls": "x-fa fa-calendar", "xtype": "appointmentbookingview", "leaf": true }
+  ]
+}

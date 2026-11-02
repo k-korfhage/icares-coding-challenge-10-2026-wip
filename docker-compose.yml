@@ -1,0 +1,14 @@
+version: '2'
+
+services:
+  db:
+    image: postgres:11-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - "POSTGRES_DB=dev"
+      - "POSTGRES_USER=icares"
+      - "POSTGRES_PASSWORD=icares"
+      - "PGDATA=/var/lib/postgresql/data/icares"
+    volumes:
+      - ./db/init:/docker-entrypoint-initdb.d

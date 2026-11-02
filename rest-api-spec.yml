@@ -1,0 +1,498 @@
+
+swagger: '2.0'
+
+info:
+  version: 1.0.0
+  title: IT Service Appointment API
+  description: >
+    REST API for managing IT service providers, IT services,
+    appointment suggestions, and customer appointments.
+    Customer numbers from the legacy system are supported.
+
+host: 127.0.0.1
+basePath: /
+schemes:
+  - http
+
+consumes:
+  - application/json
+produces:
+  - application/json
+
+tags:
+  - name: service-providers
+    description: IT-Service-Anbieter und ihre Kapazitäten
+  - name: services
+    description: Angebotene IT-Dienstleistungen
+  - name: appointments
+    description: Kundentermine
+  - name: appointment-suggestions
+    description: Verfügbare Terminvorschläge
+
+paths:
+  /service-providers:
+    get:
+      tags:
+        - service-providers
+      summary: Alle IT-Service-Anbieter abrufen
+      operationId: getServiceProviders
+      responses:
+        '200':
+          description: Liste aller IT-Service-Anbieter
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/serviceProvider'
+
+  /service-providers/{providerId}:
+    get:
+      tags:
+        - service-providers
+      summary: Details eines IT-Service-Anbieters abrufen
+      operationId: getServiceProvider
+      parameters:
+        - $ref: '#/parameters/providerId'
+      responses:
+        '200':
+          description: IT-Service-Anbieter gefunden
+          schema:
+            $ref: '#/definitions/serviceProvider'
+        '404':
+          description: IT-Service-Anbieter nicht gefunden
+
+  /service-providers/{providerId}/services:
+    get:
+      tags:
+        - services
+      summary: Dienstleistungen eines IT-Service-Anbieters abrufen
+      operationId: getServices
+      parameters:
+        - $ref: '#/parameters/providerId'
+      responses:
+        '200':
+          description: Liste der angebotenen Dienstleistungen
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/service'
+        '404':
+          description: IT-Service-Anbieter nicht gefunden
+
+  /service-providers/{providerId}/appointments:
+    get:
+      tags:
+        - appointments
+      summary: Kundentermine eines IT-Service-Anbieters abrufen
+      operationId: getAppointments
+      parameters:
+        - $ref: '#/parameters/providerId'
+        - name: from
+          in: query
+          description: Beginn des Abfragezeitraums inklusive (ISO 8601)
+          required: false
+          type: string
+          format: date-time
+        - name: to
+          in: query
+          description: Ende des Abfragezeitraums inklusive (ISO 8601)
+          required: false
+          type: string
+          format: date-time
+        - name: serviceId
+          in: query
+          description: Termine auf eine bestimmte Dienstleistung beschränken
+          required: false
+          type: integer
+          format: int64
+        - name: customerNumber
+          in: query
+          description: Termine nach Kundennummer filtern
+          required: false
+          type: string
+      responses:
+        '200':
+          description: Liste der Kundentermine
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/appointment'
+        '404':
+          description: IT-Service-Anbieter nicht gefunden
+
+    post:
+      tags:
+        - appointments
+      summary: Neuen Kundentermin buchen
+      description: >
+        Bucht einen Termin für eine ausgewählte IT-Dienstleistung.
+        Die Dauer wird anhand der konfigurierten Dienstleistung berechnet.
+        Vor der Buchung muss die Kapazität erneut geprüft werden.
+        Bei ausgeschöpfter Kapazität wird HTTP 409 zurückgegeben.
+      operationId: createAppointment
+      parameters:
+        - $ref: '#/parameters/providerId'
+        - name: appointment
+          in: body
+          description: Angaben zum gewünschten Termin
+          required: true
+          schema:
+            $ref: '#/definitions/appointmentRequest'
+      responses:
+        '201':
+          description: Termin erfolgreich gebucht
+          schema:
+            $ref: '#/definitions/appointment'
+        '400':
+          description: Ungültige Buchungsdaten oder ungültiger Zeitraster
+        '404':
+          description: IT-Service-Anbieter oder Dienstleistung nicht gefunden
+        '409':
+          description: Termin nicht verfügbar oder Kapazität ausgeschöpft
+
+  /service-providers/{providerId}/appointments/import:
+    post:
+      tags:
+        - appointments
+      summary: Bestehende Kundentermine aus einer CSV-Datei importieren
+      description: >
+        Prüft zunächst alle CSV-Datensätze auf Plausibilität und anschließend
+        die Kapazität des Anbieters. Bei mindestens einem Kapazitätskonflikt
+        wird der gesamte Import abgelehnt. Bei Erfolg werden alle Termine
+        transaktional angelegt und als Liste zurückgegeben.
+      operationId: importAppointmentsFromCsv
+      consumes:
+        - multipart/form-data
+      parameters:
+        - $ref: '#/parameters/providerId'
+        - name: file
+          in: formData
+          description: CSV-Datei mit zu importierenden Terminen. Benötigt Header KdnNr,APP_DATE,SERVICE
+          required: true
+          type: file
+      responses:
+        '201':
+          description: Alle Termine wurden erfolgreich angelegt
+          headers:
+            Location:
+              type: string
+              description: URI des ersten angelegten Termins
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/appointment'
+        '400':
+          description: CSV-Datei oder mindestens ein Datensatz ist ungültig; es wurde nichts importiert
+          schema:
+            $ref: '#/definitions/appointmentImportValidationResponse'
+        '404':
+          description: IT-Service-Anbieter nicht gefunden
+        '409':
+          description: >
+            Mindestens ein Termin überschreitet die Kapazität; der gesamte Import wurde abgebrochen und
+            ggf. bereits gebuchte Termine wurden zurückgerollt
+          schema:
+            $ref: '#/definitions/appointmentImportConflictResponse'
+
+  /service-providers/{providerId}/appointments/{appointmentId}:
+    get:
+      tags:
+        - appointments
+      summary: Details eines Kundentermins abrufen
+      operationId: getAppointment
+      parameters:
+        - $ref: '#/parameters/providerId'
+        - name: appointmentId
+          in: path
+          description: Eindeutige Kennung des Termins
+          required: true
+          type: integer
+          format: int64
+      responses:
+        '200':
+          description: Termindetails
+          schema:
+            $ref: '#/definitions/appointment'
+        '404':
+          description: Termin oder IT-Service-Anbieter nicht gefunden
+
+  /service-providers/{providerId}/appointment-suggestions:
+    get:
+      tags:
+        - appointment-suggestions
+      summary: Verfügbare Termine vorschlagen
+      description: >
+        Liefert verfügbare Startzeiten im 15-Minuten-Raster.
+        Die Dauer der gewählten Dienstleistung und die parallele
+        Kapazität des Anbieters werden berücksichtigt.
+        Bestehende und importierte Termine fließen in die Berechnung ein.
+      operationId: getAppointmentSuggestions
+      parameters:
+        - $ref: '#/parameters/providerId'
+        - name: serviceId
+          in: query
+          description: Kennung der gewünschten Dienstleistung
+          required: true
+          type: integer
+          format: int64
+        - name: from
+          in: query
+          description: Beginn des Suchzeitraums (ISO 8601)
+          required: true
+          type: string
+          format: date-time
+        - name: to
+          in: query
+          description: Ende des Suchzeitraums (ISO 8601)
+          required: true
+          type: string
+          format: date-time
+      responses:
+        '200':
+          description: Liste verfügbarer Terminvorschläge
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/appointmentSuggestion'
+        '400':
+          description: Ungültiger Suchzeitraum
+        '404':
+          description: IT-Service-Anbieter oder Dienstleistung nicht gefunden
+
+parameters:
+  providerId:
+    name: providerId
+    in: path
+    description: Eindeutige Kennung des IT-Service-Anbieters
+    required: true
+    type: integer
+    format: int64
+
+definitions:
+  serviceProvider:
+    type: object
+    required:
+      - providerId
+      - name
+      - capacity
+    properties:
+      providerId:
+        type: integer
+        format: int64
+        description: Eindeutige Kennung des IT-Service-Anbieters
+        example: 1
+      name:
+        type: string
+        description: Name des IT-Service-Anbieters
+        example: IT-Service Müller
+      capacity:
+        type: integer
+        minimum: 1
+        description: Maximale Anzahl parallel laufender Termine
+        example: 2
+
+  service:
+    type: object
+    required:
+      - serviceId
+      - code
+      - name
+      - durationMinutes
+    properties:
+      serviceId:
+        type: integer
+        format: int64
+        description: Eindeutige Kennung der Dienstleistung
+        example: 1
+      code:
+        type: string
+        description: Leistungscode aus dem Altsystem
+        example: DIA
+      name:
+        type: string
+        description: Bezeichnung der Dienstleistung
+        example: PC-Diagnose
+      durationMinutes:
+        type: integer
+        minimum: 1
+        description: Bearbeitungsdauer in Minuten
+        example: 30
+
+  appointment:
+    type: object
+    required:
+      - id
+      - customerNumber
+      - start
+      - end
+      - providerId
+      - providerName
+      - serviceId
+      - serviceName
+    properties:
+      id:
+        type: integer
+        format: int64
+        description: Eindeutige Kennung des Termins
+        example: 1
+      customerNumber:
+        type: string
+        description: Kundennummer aus dem Altsystem
+        example: '10001'
+      start:
+        type: string
+        format: date-time
+        description: Startzeitpunkt des Termins (ISO 8601)
+        example: '2026-11-02T09:00:00Z'
+      end:
+        type: string
+        format: date-time
+        description: Endzeitpunkt des Termins (ISO 8601)
+        example: '2026-11-02T09:30:00Z'
+      providerId:
+        type: integer
+        format: int64
+        description: Kennung des IT-Service-Anbieters
+        example: 1
+      providerName:
+        type: string
+        description: Name des IT-Service-Anbieters
+        example: IT-Service Müller
+      serviceId:
+        type: integer
+        format: int64
+        description: Kennung der gebuchten Dienstleistung
+        example: 1
+      serviceName:
+        type: string
+        description: Bezeichnung der gebuchten Dienstleistung
+        example: PC-Diagnose
+
+  appointmentRequest:
+    type: object
+    required:
+      - customerNumber
+      - start
+      - serviceId
+    properties:
+      customerNumber:
+        type: string
+        description: Kundennummer des Kunden
+        example: '10001'
+      start:
+        type: string
+        format: date-time
+        description: Gewünschter Startzeitpunkt im 15-Minuten-Raster
+        example: '2026-11-02T09:00:00Z'
+      serviceId:
+        type: integer
+        format: int64
+        description: Kennung der gewünschten Dienstleistung
+        example: 1
+
+  appointmentSuggestion:
+    type: object
+    required:
+      - start
+      - end
+      - providerId
+      - serviceId
+    properties:
+      start:
+        type: string
+        format: date-time
+        description: Vorgeschlagener Startzeitpunkt
+        example: '2026-11-02T09:00:00Z'
+      end:
+        type: string
+        format: date-time
+        description: Voraussichtlicher Endzeitpunkt
+        example: '2026-11-02T09:30:00Z'
+      providerId:
+        type: integer
+        format: int64
+        description: Kennung des IT-Service-Anbieters
+        example: 1
+      serviceId:
+        type: integer
+        format: int64
+        description: Kennung der Dienstleistung
+        example: 1
+
+  appointmentImportValidationResponse:
+    type: object
+    required:
+      - errors
+    properties:
+      errors:
+        type: array
+        description: Alle erkannten Validierungsfehler, jeweils mit CSV-Zeilennummer
+        items:
+          $ref: '#/definitions/appointmentImportError'
+
+  appointmentImportError:
+    type: object
+    required:
+      - lineNumber
+      - reason
+    properties:
+      lineNumber:
+        type: integer
+        description: Zeilennummer in der CSV-Datei, Headerzeile mitgezählt
+        example: 3
+      reason:
+        type: string
+        description: Beschreibung des Validierungsfehlers
+        example: APP_DATE muss ein ISO-8601-Zeitpunkt mit Zeitzone sein
+
+  appointmentImportConflictResponse:
+    type: object
+    required:
+      - conflicts
+    properties:
+      conflicts:
+        type: array
+        description: CSV-Terminzeilen, die zu Kapazitätskonflikten führen
+        items:
+          $ref: '#/definitions/appointmentImportConflict'
+
+  appointmentImportConflict:
+    type: object
+    required:
+      - lineNumber
+      - customerNumber
+      - serviceCode
+      - start
+      - reason
+      - conflictsWithExistingAppointments
+      - overlappingAcceptedCsvLineNumbers
+    properties:
+      lineNumber:
+        type: integer
+        description: Zeilennummer des abgelehnten Termins in der CSV-Datei
+        example: 4
+      customerNumber:
+        type: string
+        description: Kundennummer aus der CSV-Datei
+        example: '10003'
+      serviceCode:
+        type: string
+        description: Leistungscode aus der CSV-Datei
+        example: DIA
+      start:
+        type: string
+        format: date-time
+        description: Startzeitpunkt des abgelehnten Termins
+        example: '2026-11-02T09:00:00Z'
+      reason:
+        type: string
+        description: Grund des Kapazitätskonflikts
+      conflictsWithExistingAppointments:
+        type: boolean
+        description: Gibt an, ob Bestandsdaten allein bereits zu einem Kapazitätskonflikt führen
+        example: false
+      overlappingAcceptedCsvLineNumbers:
+        type: array
+        description: Zeilennummern früherer, kapazitätsmäßig akzeptierter CSV-Termine, die zeitlich überlappen
+        items:
+          type: integer
+        example: [2, 3]
